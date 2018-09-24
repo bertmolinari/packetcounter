@@ -66,28 +66,34 @@ int setupLogger()
         return -2;
     }
 
-    g_logFile = fopen("logfile2.txt", "w+");
+    g_logFile = fopen("logfile.txt", "w+");
     if(g_logFile == NULL)
     {
         return -1;
     }
 
-   time_t curtime;
+    // we want each file in the log to have a date/time stamp so create that starting with getting the current time
+    time_t curtime;
+    time(&curtime);
 
-   time(&curtime);
+    // put the string version of this into a buffer, and remove the line feed that ctime() adds so we have a nicely formatted log line in the file
+    char timedateStamp[128];
+    sprintf( timedateStamp, "%s", ctime(&curtime));
+    int timedateStampLength = strlen(timedateStamp);
+    timedateStamp[ timedateStampLength -1 ] = '\0';
 
+    // compose the line that indicicates log file initialization
     char buffer[512];
-    sprintf( buffer, "%s ---logger initialized ---\n", ctime(&curtime));
+    sprintf( buffer, "%s ---logger initialized ---\n", timedateStamp);
 
-    printf("%s", buffer);
-
-    int bytesWritten = fwrite(buffer, strlen(buffer), 1, g_logFile);
+    // write the initialized line to disk
+    int bytesWritten = fwrite(buffer, 1, strlen(buffer),  g_logFile);
     if(bytesWritten != strlen(buffer))
     {
         printf("Error while writing to log file: %d, bytesWritten: %d\n", ferror( g_logFile ), bytesWritten);
     }
+    fflush( g_logFile );
 
-    printf("log file should be created\n");
     return 0;
 }
 
@@ -106,14 +112,16 @@ void logError(char* message, int error)
     if( g_logFile != NULL )
     {
         time_t curtime;
-       time(&curtime);
+        time(&curtime);
+        char timedateStamp[128];
+        sprintf( timedateStamp, "%s", ctime(&curtime));
+        int timedateStampLength = strlen(timedateStamp);
+        timedateStamp[ timedateStampLength -1 ] = '\0';
 
         char buffer[512];
-        sprintf( buffer, "%s", ctime(&curtime));
+        sprintf(buffer, "%s %s %d\n", timedateStamp, message, error);
         fwrite(buffer, strlen(buffer), sizeof(char), g_logFile);
-
-        sprintf(buffer, message, error);
-        fwrite(buffer, strlen(buffer), sizeof(char), g_logFile);
+        fflush(g_logFile);
 
         printf(message, error);
     }
@@ -137,43 +145,52 @@ void* packetListener(void* param)
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
     socklen_t addr_size;
+    int connectionCounter = 0;
 
-  /*---- Create the socket. The three arguments are: ----*/
-  /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
-  welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
-  
-  /*---- Configure settings of the server address struct ----*/
-  /* Address family = Internet */
-  serverAddr.sin_family = AF_INET;
-  /* Set port number, using htons function to use proper byte order */
-  serverAddr.sin_port = htons(7891);
-  /* Set IP address to localhost */
-  serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  /* Set all bits of the padding field to 0 */
-  memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
+    /*---- Create the socket. The three arguments are: ----*/
+    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
+    welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
 
-  /*---- Bind the address struct to the socket ----*/
-  bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+    /*---- Configure settings of the server address struct ----*/
+    /* Address family = Internet */
+    serverAddr.sin_family = AF_INET;
+    /* Set port number, using htons function to use proper byte order */
+    serverAddr.sin_port = htons(7891);
+    /* Set IP address to localhost */
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    /* Set all bits of the padding field to 0 */
+    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
 
-  /*---- Listen on the socket, with 5 max connection requests queued ----*/
-  int result;
-  result = listen( welcomeSocket, 5);
-  if(listen(welcomeSocket,5)==0)
-    logError("Listening with no error: %d\n", 0);
-  else
-    logError("Listen failed with error: %d\n", result);
+    /*---- Bind the address struct to the socket ----*/
+    bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
 
-  /*---- Accept call creates a new socket for the incoming connection ----*/
-  addr_size = sizeof serverStorage;
-  newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
-
-  /*---- Send message to the socket of the incoming connection ----*/
-  strcpy(buffer,"Hello World\n");
-  send(newSocket,buffer,13,0);
+    /*---- Listen on the socket, with 5 max connection requests queued ----*/
+    int result;
+    result = listen( welcomeSocket, 5);
+    if(listen(welcomeSocket,5)==0)
+    {
+        logError("Listening with no error", 0);
+    }
+    else
+    {
+        logError("Listen failed with error", result);
+    }
 
     while(1)
     {
-//        logError("from thread -- there was no error %d\n", 0);
+        /*---- Accept call creates a new socket for the incoming connection ----*/
+        addr_size = sizeof serverStorage;
+        newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
+
+        /*---- Send message to the socket of the incoming connection ----*/
+        strcpy(buffer,"Hello World\n");
+        send(newSocket,buffer,13,0);
+
+        connectionCounter++;
+
+        logError("Connection count: ", connectionCounter);
+
+        sleep(1);
     }
 
     return NULL;
