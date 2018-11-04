@@ -1,3 +1,3 @@
 #!/bin/bash
-gcc packetcounter.c -lpthread
+gcc packetcounter.c -lpthread -lcurl -o packetcounter
 

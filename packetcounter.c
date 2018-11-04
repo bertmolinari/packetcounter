@@ -6,14 +6,17 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h> 
+#include <curl/curl.h>
 
 int setupLogger();
 int setupPacketListener();
 int setupWebListener();
+int setupCurl();
 
 int teardownLogger();
 int teardownPacketListener();
 int teardownWebListener();
+int teardownCurl();
 
 void* packetListener(void* param);
 
@@ -21,6 +24,7 @@ void logError();
 
 pthread_t g_packetListenerThread;
 pthread_t g_webListenerThread;
+CURL* g_curlObjectPtr = NULL;
 
 FILE* g_logFile = NULL;
 
@@ -183,8 +187,8 @@ void* packetListener(void* param)
         newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
 
         /*---- Send message to the socket of the incoming connection ----*/
-        strcpy(buffer,"Hello World\n");
-        send(newSocket,buffer,13,0);
+        strcpy(buffer,"Hello World from packetcounter!");
+        send(newSocket,buffer,strlen(buffer),0);
 
         connectionCounter++;
 
@@ -209,4 +213,45 @@ int setupWebListener()
 int teardownWebListener()
 {
     return 0;
+}
+
+
+int setupCurl()
+{
+
+  CURLcode res;
+ 
+  /* In windows, this will init the winsock stuff */ 
+  curl_global_init(CURL_GLOBAL_ALL);
+ 
+  /* get a curl handle */ 
+  g_curlObjectPtr = curl_easy_init();
+  if(g_curlObjectPtr) {
+    // /* First set the URL that is about to receive our POST. This URL can
+    //    just as well be a https:// URL if that is what should receive the
+    //    data. */ 
+    // curl_easy_setopt(curl, CURLOPT_URL, "http://postit.example.com/moo.cgi");
+    // /* Now specify the POST data */ 
+    // curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
+ 
+    // /* Perform the request, res will get the return code */ 
+    // res = curl_easy_perform(curl);
+    // /* Check for errors */ 
+    // if(res != CURLE_OK)
+    //   fprintf(stderr, "curl_easy_perform() failed: %s\n",
+    //           curl_easy_strerror(res));
+ 
+  }
+  return 0;
+}
+
+int teardownCurl()
+{
+    if( g_curlObjectPtr != NULL) 
+    {
+        /* always cleanup */ 
+        curl_easy_cleanup(g_curlObjectPtr);
+
+        curl_global_cleanup();
+    }
 }
