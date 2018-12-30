@@ -127,7 +127,7 @@ void logError(char* message, int error)
         fwrite(buffer, strlen(buffer), sizeof(char), g_logFile);
         fflush(g_logFile);
 
-        printf(message, error);
+        // printf(message, error);
     }
 }
 
@@ -150,6 +150,7 @@ void* packetListener(void* param)
     struct sockaddr_storage serverStorage;
     socklen_t addr_size;
     int connectionCounter = 0;
+    int portNumber = 7891;
 
     /*---- Create the socket. The three arguments are: ----*/
     /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
@@ -159,7 +160,7 @@ void* packetListener(void* param)
     /* Address family = Internet */
     serverAddr.sin_family = AF_INET;
     /* Set port number, using htons function to use proper byte order */
-    serverAddr.sin_port = htons(7891);
+    serverAddr.sin_port = htons(portNumber);
     /* Set IP address to localhost */
     serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
     /* Set all bits of the padding field to 0 */
@@ -174,6 +175,7 @@ void* packetListener(void* param)
     if(listen(welcomeSocket,5)==0)
     {
         logError("Listening with no error", 0);
+        printf("listnening on port: %d\n", portNumber);
     }
     else
     {
