@@ -145,7 +145,7 @@ int setupPacketListener()
 void* packetListener(void* param)
 {
     int welcomeSocket, newSocket;
-    char buffer[1024];
+    char buffer[2048];
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
     socklen_t addr_size;
@@ -177,12 +177,17 @@ void* packetListener(void* param)
     if(listen(welcomeSocket,5)==0)
     {
         logError("Listening with no error", 0);
-        printf("listnening on port: %d\n", portNumber);
+        printf("Listening on port: %d\n", portNumber);
     }
     else
     {
         logError("Listen failed with error", result);
     }
+
+    /* get the name of the machine we're running on in order to output it back to clients */
+    char hostname[1024];
+    hostname[1023] = '\0';
+    gethostname(hostname, 1023);
 
     while(1)
     {
@@ -191,7 +196,7 @@ void* packetListener(void* param)
         newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
 
         /*---- Send message to the socket of the incoming connection ----*/
-        strcpy(buffer,"Hello World from packetcounter!");
+        sprintf( buffer, "Hello from packet counter, running on %s!\n", hostname);
         send(newSocket,buffer,strlen(buffer),0);
 
         connectionCounter++;
