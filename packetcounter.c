@@ -1,11 +1,12 @@
 #include <pthread.h>
 #include <stdio.h>
+//#include <string>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <arpa/inet.h> 
+#include <arpa/inet.h>
 #include <curl/curl.h>
 
 int setupLogger();
@@ -25,15 +26,20 @@ void logError();
 pthread_t g_packetListenerThread;
 pthread_t g_webListenerThread;
 CURL* g_curlObjectPtr = NULL;
+int g_connectionCounter = 0;
+
 
 FILE* g_logFile = NULL;
-
-
+char* g_clientConnectionInfoStorageAccountName = "connectioninfo.table.core.windows.net";
+char* g_clientConnectionInfoTableName = "clientConnectionInfo";
+char* g_entityFormatString = "{ \"PartitionKey\":%s, \"RowKey\":%s, \"Count\":%d }";
+char* g_clientConnectionPartitionKey = "packetcounter";
 
 int main(int argc, char** argv)
 {
    int errno = 0;
 
+    // std::string s = "foo";
     errno = setupLogger();
     if(errno != 0)
     {
@@ -59,7 +65,7 @@ int main(int argc, char** argv)
     teardownPacketListener();
     teardownLogger();
 
-    return 0; 
+    return 0;
 }
 
 /* log related functions */
@@ -138,7 +144,7 @@ int setupPacketListener()
     pthread_attr_t threadAttributes;
 
     result = pthread_create( &g_packetListenerThread, NULL, packetListener, NULL );
- 
+
     return result;
 }
 
@@ -149,7 +155,6 @@ void* packetListener(void* param)
     struct sockaddr_in serverAddr;
     struct sockaddr_storage serverStorage;
     socklen_t addr_size;
-    int connectionCounter = 0;
     int portNumber = 7891;
 
     /*---- Create the socket. The three arguments are: ----*/
@@ -166,7 +171,7 @@ void* packetListener(void* param)
     // serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     /* Set all bits of the padding field to 0 */
-    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
+    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);
 
     /*---- Bind the address struct to the socket ----*/
     bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
@@ -199,9 +204,9 @@ void* packetListener(void* param)
         sprintf( buffer, "Hello from packet counter, running on %s!\n", hostname);
         send(newSocket,buffer,strlen(buffer),0);
 
-        connectionCounter++;
+        g_connectionCounter++;
 
-        logError("Connection count: ", connectionCounter);
+        logError("Connection count: ", g_connectionCounter);
 
         sleep(1);
     }
@@ -229,36 +234,94 @@ int setupCurl()
 {
 
   CURLcode res;
- 
-  /* In windows, this will init the winsock stuff */ 
+
+  /* In windows, this will init the winsock stuff */
   curl_global_init(CURL_GLOBAL_ALL);
- 
-  /* get a curl handle */ 
+
+  /* get a curl handle */
   g_curlObjectPtr = curl_easy_init();
   if(g_curlObjectPtr) {
     // /* First set the URL that is about to receive our POST. This URL can
     //    just as well be a https:// URL if that is what should receive the
-    //    data. */ 
+    //    data. */
     // curl_easy_setopt(curl, CURLOPT_URL, "http://postit.example.com/moo.cgi");
-    // /* Now specify the POST data */ 
+    // /* Now specify the POST data */
     // curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
- 
-    // /* Perform the request, res will get the return code */ 
+
+    // /* Perform the request, res will get the return code */
     // res = curl_easy_perform(curl);
-    // /* Check for errors */ 
+    // /* Check for errors */
     // if(res != CURLE_OK)
     //   fprintf(stderr, "curl_easy_perform() failed: %s\n",
     //           curl_easy_strerror(res));
- 
+
   }
   return 0;
 }
 
+int writeCounterDataToStorage()
+{
+    int res = 0;
+
+    if( g_curlObjectPtr )
+    {
+        char hostname[1024];
+        hostname[1023] = '\0';
+        gethostname(hostname, 1023);
+
+        char url[2048];
+        sprintf( url, "https://%s/%s(PartitionKey=\'%s\',RowKey=\'%s\'",    g_clientConnectionInfoStorageAccountName, 
+                                                                            g_clientConnectionInfoTableName,
+                                                                            g_clientConnectionPartitionKey,
+                                                                            hostname);
+        char buffer [ 2048 ];
+        sprintf( buffer, g_entityFormatString, g_clientConnectionPartitionKey, hostname, g_connectionCounter);
+
+        curl_easy_setopt(g_curlObjectPtr, CURLOPT_URL, url);
+        curl_easy_setopt(g_curlObjectPtr, CURLOPT_PUT, 1L);
+        curl_easy_setopt(g_curlObjectPtr, CURLOPT_READDATA, buffer);
+
+        struct curl_slist *list = NULL;
+        
+        /* the following HTTP headers are needed for authorization with the Azure Storage service (see https://docs.microsoft.com/en-us/rest/api/storageservices/authorize-with-shared-key for reference) */
+        /*   - x-ms-date
+             - Authorization
+        */
+
+        /* create and add the x-ms-date header */
+        char dateHeader[1024];
+
+        time_t curtime;
+        time(&curtime);
+        char timedateStamp[128];
+        sprintf( timedateStamp, "%s", ctime(&curtime));
+        int timedateStampLength = strlen(timedateStamp);
+        timedateStamp[ timedateStampLength -1 ] = '\0';
+
+        sprintf(dateHeader, "x-ms-date: %s", timedateStamp);
+        list = curl_slist_append(list, dateHeader);
+
+
+        // /* Now specify the POST data */
+        // curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
+
+        /* Perform the request, res will get the return code */
+        res = curl_easy_perform(g_curlObjectPtr);
+        /* Check for errors */
+        if(res != CURLE_OK)
+        {
+            logError("curl_easy_perform() failed:", res);
+        }
+    }
+
+    return res;
+}
+
 int teardownCurl()
 {
-    if( g_curlObjectPtr != NULL) 
+    if( g_curlObjectPtr != NULL)
     {
-        /* always cleanup */ 
+        /* always cleanup */
         curl_easy_cleanup(g_curlObjectPtr);
 
         curl_global_cleanup();
