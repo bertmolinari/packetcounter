@@ -9,6 +9,9 @@
 #include <arpa/inet.h>
 #include <curl/curl.h>
 
+#include <was/storage_account.h>
+#include <was/table.h>
+
 int setupLogger();
 int setupPacketListener();
 int setupWebListener();
@@ -19,6 +22,8 @@ int teardownPacketListener();
 int teardownWebListener();
 int teardownCurl();
 
+int writeCounterDataToStorage();
+
 void* packetListener(void* param);
 void logError(const char* message, int error);
 
@@ -26,6 +31,9 @@ pthread_t g_packetListenerThread;
 pthread_t g_webListenerThread;
 CURL* g_curlObjectPtr = NULL;
 int g_connectionCounter = 0;
+
+// Define the Storage connection string with your values.
+const utility::string_t storage_connection_string(U("DefaultEndpointsProtocol=https;AccountName=connectioninfo;AccountKey=9/MS0Mei5VQdBhPmYvPQiK405dtFkye80eTD/8E+Y5bFgui2fN+d4yEzSHwkDxNlgHkv2+E1HxIZWNwz2EME9A=="));
 
 
 FILE* g_logFile = NULL;
@@ -36,20 +44,20 @@ std::string g_clientConnectionPartitionKey = "packetcounter";
 
 int main(int argc, char** argv)
 {
-   int errno = 0;
+   int result = 0;
 
     std::string s = "foo";
-    errno = setupLogger();
-    if(errno != 0)
+    result = setupLogger();
+    if(result != 0)
     {
-        printf("encountered error while setting up logger: %d\n", errno);
+        printf("encountered error while setting up logger: %d\n", result);
     }
 
     // setup the listener for packets
-    errno = setupPacketListener();
-    if(errno != 0)
+    result = setupPacketListener();
+    if(result != 0)
     {
-        logError("encountered error while setting up packert listener: %d\n", errno);
+        logError("encountered error while setting up packert listener: %d\n", result);
     }
 
     // setup the listener for HTTP requests to check status
@@ -131,8 +139,6 @@ void logError(const char* message, int error)
         sprintf(buffer, "%s %s %d\n", timedateStamp, message, error);
         fwrite(buffer, strlen(buffer), sizeof(char), g_logFile);
         fflush(g_logFile);
-
-        // printf(message, error);
     }
 }
 
@@ -205,6 +211,8 @@ void* packetListener(void* param)
 
         g_connectionCounter++;
 
+        writeCounterDataToStorage();
+
         logError("Connection count: ", g_connectionCounter);
 
         sleep(1);
@@ -262,34 +270,24 @@ int writeCounterDataToStorage()
 {
     int res = 0;
 
-    if( g_curlObjectPtr )
+    try
     {
+        // Retrieve the storage account from the connection string.
+        azure::storage::cloud_storage_account storage_account = azure::storage::cloud_storage_account::parse(storage_connection_string);
+
+        // Create the table client.
+        azure::storage::cloud_table_client table_client = storage_account.create_cloud_table_client();
+
+        // Retrieve a reference to a table.
+        azure::storage::cloud_table table = table_client.get_table_reference(U("clientConnectionInfo"));
+
+        // Create the table if it doesn't exist.
+        table.create_if_not_exists();
+
         // std::string hostname;
         char hostname[1024];
         hostname[1023] = '\0';
         gethostname(hostname, 1023);
-
-        char url[2048];
-        sprintf( url, "https://%s/%s(PartitionKey=\'%s\',RowKey=\'%s\'",    g_clientConnectionInfoStorageAccountName.c_str(), 
-                                                                            g_clientConnectionInfoTableName.c_str(),
-                                                                            g_clientConnectionPartitionKey.c_str(),
-                                                                            hostname);
-        char buffer [ 2048 ];
-        sprintf( buffer, g_entityFormatString.c_str(), g_clientConnectionPartitionKey.c_str(), hostname, g_connectionCounter);
-
-        curl_easy_setopt(g_curlObjectPtr, CURLOPT_URL, url);
-        curl_easy_setopt(g_curlObjectPtr, CURLOPT_PUT, 1L);
-        curl_easy_setopt(g_curlObjectPtr, CURLOPT_READDATA, buffer);
-
-        struct curl_slist *list = NULL;
-        
-        /* the following HTTP headers are needed for authorization with the Azure Storage service (see https://docs.microsoft.com/en-us/rest/api/storageservices/authorize-with-shared-key for reference) */
-        /*   - x-ms-date
-             - Authorization
-        */
-
-        /* create and add the x-ms-date header */
-        char dateHeader[1024];
 
         time_t curtime;
         time(&curtime);
@@ -298,23 +296,79 @@ int writeCounterDataToStorage()
         int timedateStampLength = strlen(timedateStamp);
         timedateStamp[ timedateStampLength -1 ] = '\0';
 
-        sprintf(dateHeader, "x-ms-date: %s", timedateStamp);
-        list = curl_slist_append(list, dateHeader);
+        // Create a new  entity using the hostname of the machine we're running on as the partitionkey and the date/time as the rowkey
+        azure::storage::table_entity entry(hostname, timedateStamp);
 
+        azure::storage::table_entity::properties_type& properties = entry.properties();
+        properties.reserve(1);
+        properties[U("Count")] = azure::storage::entity_property(g_connectionCounter);
 
-        // /* Now specify the POST data */
-        // curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
+        // Create the table operation that inserts the customer entity.
+        azure::storage::table_operation insert_operation = azure::storage::table_operation::insert_entity(entry);
 
-        /* Perform the request, res will get the return code */
-        res = curl_easy_perform(g_curlObjectPtr);
-        /* Check for errors */
-        if(res != CURLE_OK)
-        {
-            logError("curl_easy_perform() failed:", res);
-        }
+        // Execute the insert operation.
+        azure::storage::table_result insert_result = table.execute(insert_operation);
+    }
+    catch( azure::storage::storage_exception e)
+    {
+        logError(e.what(), 0);
     }
 
     return res;
+
+    // if( g_curlObjectPtr )
+    // {
+    //     // std::string hostname;
+    //     char hostname[1024];
+    //     hostname[1023] = '\0';
+    //     gethostname(hostname, 1023);
+
+    //     char url[2048];
+    //     sprintf( url, "https://%s/%s(PartitionKey=\'%s\',RowKey=\'%s\'",    g_clientConnectionInfoStorageAccountName.c_str(), 
+    //                                                                         g_clientConnectionInfoTableName.c_str(),
+    //                                                                         g_clientConnectionPartitionKey.c_str(),
+    //                                                                         hostname);
+    //     char buffer [ 2048 ];
+    //     sprintf( buffer, g_entityFormatString.c_str(), g_clientConnectionPartitionKey.c_str(), hostname, g_connectionCounter);
+
+    //     curl_easy_setopt(g_curlObjectPtr, CURLOPT_URL, url);
+    //     curl_easy_setopt(g_curlObjectPtr, CURLOPT_PUT, 1L);
+    //     curl_easy_setopt(g_curlObjectPtr, CURLOPT_READDATA, buffer);
+
+    //     struct curl_slist *list = NULL;
+        
+    //     /* the following HTTP headers are needed for authorization with the Azure Storage service (see https://docs.microsoft.com/en-us/rest/api/storageservices/authorize-with-shared-key for reference) */
+    //     /*   - x-ms-date
+    //          - Authorization
+    //     */
+
+    //     /* create and add the x-ms-date header */
+    //     char dateHeader[1024];
+
+    //     time_t curtime;
+    //     time(&curtime);
+    //     char timedateStamp[128];
+    //     sprintf( timedateStamp, "%s", ctime(&curtime));
+    //     int timedateStampLength = strlen(timedateStamp);
+    //     timedateStamp[ timedateStampLength -1 ] = '\0';
+
+    //     sprintf(dateHeader, "x-ms-date: %s", timedateStamp);
+    //     list = curl_slist_append(list, dateHeader);
+
+
+    //     // /* Now specify the POST data */
+    //     // curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "name=daniel&project=curl");
+
+    //     /* Perform the request, res will get the return code */
+    //     res = curl_easy_perform(g_curlObjectPtr);
+    //     /* Check for errors */
+    //     if(res != CURLE_OK)
+    //     {
+    //         logError("curl_easy_perform() failed:", res);
+    //     }
+    // }
+
+    // return res;
 }
 
 int teardownCurl()
