@@ -33,7 +33,7 @@ CURL* g_curlObjectPtr = NULL;
 int g_connectionCounter = 0;
 
 // Define the Storage connection string with your values.
-const utility::string_t storage_connection_string(U("DefaultEndpointsProtocol=https;AccountName=connectioninfo;AccountKey=9/MS0Mei5VQdBhPmYvPQiK405dtFkye80eTD/8E+Y5bFgui2fN+d4yEzSHwkDxNlgHkv2+E1HxIZWNwz2EME9A=="));
+utility::string_t storage_connection_string(U("DefaultEndpointsProtocol=https;AccountName=connectioninfo;AccountKey="));
 
 
 FILE* g_logFile = NULL;
@@ -45,6 +45,14 @@ std::string g_clientConnectionPartitionKey = "packetcounter";
 int main(int argc, char** argv)
 {
    int result = 0;
+
+    if(argc != 2)
+    {
+        ::printf("Usage: packetcounter <azure-storage-account-key>\n");
+        return 0;
+    }
+
+    storage_connection_string += argv[1];
 
     std::string s = "foo";
     result = setupLogger();
