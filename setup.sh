@@ -2,7 +2,7 @@
 cd ..
 
 # install packages that we need for building
-sudo apt-get install g++ libboost-atomic-dev libboost-thread-dev libboost-system-dev libboost-date-time-dev libboost-regex-dev libboost-filesystem-dev libboost-random-dev libboost-chrono-dev libboost-serialization-dev libwebsocketpp-dev openssl libssl-dev ninja-build libxml2-dev uuid-dev cmake
+sudo apt-get install g++ libboost-all-dev libwebsocketpp-dev openssl libssl-dev ninja-build libxml2-dev uuid-dev cmake
 
 # clone the code for the Azure Storage C++ SDK and the Microsoft C++ REST SDK locally (we depend on storage, which in turn depends on the REST SDK)
 git clone https://github.com/Azure/azure-storage-cpp.git
@@ -19,7 +19,7 @@ ninja
 cd ../azure-storage-cpp/Microsoft.WindowsAzure.Storage
 mkdir build.debug
 cd build.debug
-CASABLANCA_DIR=~/casablanca/build.debug CXX=g++ cmake -DCMAKE_BUILD_TYPE=Debug
+CASABLANCA_DIR=~/casablanca/build.debug CXX=g++ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make
 
 
